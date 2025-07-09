@@ -1,0 +1,91 @@
+#Carbon project with Purity Kinyamu
+
+
+import requests
+from bs4 import BeautifulSoup
+import os
+import datetime
+
+# List of ART project IDs (for download)
+project_ids = ['ART101', 'ART102']
+
+# Full URL for document tab
+base_url = "https://art.apx.com/mymodule/reg/TabDocuments.asp?r=111&ad=Prpt&act=update&type=PRO&aProj=pub&tablename=doc&id1="
+
+# Output master summary
+master_log_path = "Master_Download_Summary.txt"
+with open(master_log_path, "w", encoding='utf-8') as master_log:
+    master_log.write(f"=== Master Summary Log ({datetime.datetime.now().isoformat()}) ===\n")
+
+# Headers (to mimic a browser)
+headers = {
+    'User-Agent': 'Mozilla/5.0'
+}
+
+for pid in project_ids:
+    numeric_id = ''.join(filter(str.isdigit, pid))
+    doc_page_url = f"{base_url}{numeric_id}"
+    print(f"\n📥 Accessing Documents for {pid}: {doc_page_url}")
+
+    try:
+        res = requests.get(doc_page_url, headers=headers)
+        res.raise_for_status()
+    except Exception as e:
+        print(f"❌ Failed to fetch page for {pid}: {e}")
+        with open(master_log_path, "a", encoding='utf-8') as log:
+            log.write(f"{pid}: FAILED to fetch page – {e}\n")
+        continue
+
+    soup = BeautifulSoup(res.text, 'html.parser')
+
+    folder = f"{pid}_Documents"
+    os.makedirs(folder, exist_ok=True)
+
+    count_downloaded = 0
+    count_skipped = 0
+    count_errors = 0
+
+    downloaded_files = []
+    skipped_files = []
+
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        if "Project_ViewFile.asp" in href and href.startswith("/mymodule/ProjectDoc"):
+            doc_url = f"https://art.apx.com{href}"
+            filename = a_tag.text.strip().replace("/", "-")
+            file_path = os.path.join(folder, filename)
+
+            if os.path.exists(file_path):
+                count_skipped += 1
+                skipped_files.append(filename)
+                print(f"⏩ Skipped: {filename}")
+                continue
+
+            try:
+                file_res = requests.get(doc_url, headers=headers)
+                file_res.raise_for_status()
+                with open(file_path, "wb") as f:
+                    f.write(file_res.content)
+                count_downloaded += 1
+                downloaded_files.append(filename)
+                print(f"✅ Downloaded: {filename}")
+            except Exception as e:
+                count_errors += 1
+                print(f"❌ Error downloading {filename}: {e}")
+
+    # Log all in master summary
+    with open(master_log_path, "a", encoding='utf-8') as log:
+        log.write(f"\n{pid}:\n")
+        log.write(f"  - {count_downloaded} downloaded\n")
+        if downloaded_files:
+            log.write("    Files:\n")
+            for f in downloaded_files:
+                log.write(f"      • {f}\n")
+        log.write(f"  - {count_skipped} skipped\n")
+        if skipped_files:
+            log.write("    Already present:\n")
+            for f in skipped_files:
+                log.write(f"      • {f}\n")
+        log.write(f"  - {count_errors} errors\n")
+
+print("\n✅ Processing completed. Check Master_Download_Summary for details.")
